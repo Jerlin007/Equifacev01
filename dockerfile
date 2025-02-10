@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -11,9 +11,11 @@ WORKDIR /app
 # Copy requirements.txt first for caching
 COPY requirements.txt .
 
+# Upgrade build tools
+RUN pip install --upgrade pip setuptools wheel
+
 # Install dependencies
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
 # Copy the rest of the application code
 COPY . .
