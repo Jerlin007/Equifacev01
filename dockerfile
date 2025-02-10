@@ -1,28 +1,28 @@
-# Use a Debian-based Python image
-FROM python:3-slim
+# Use an official Python runtime as a parent image
+FROM python:3.12-slim
 
-# Install system dependencies for OpenCV
-RUN apt-get update && apt-get install -y \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Set up the working directory
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy the requirements file and install dependencies
+# Copy requirements.txt first for caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code
-COPY app.py .
+# Install dependencies
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
-# Expose the port
+# Copy the rest of the application code
+COPY . .
+
+# Expose port 8080 (Koyeb expects your app to listen on port 8080)
 EXPOSE 8080
 
-# Run the application
-CMD ["gunicorn", "--bind", ":8080", "--workers", "2", "app:app"]
+# Use gunicorn to serve your app.
+# Ensure your Flask app’s main file (e.g., app.py) exposes a WSGI callable named `app`
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
+
 
