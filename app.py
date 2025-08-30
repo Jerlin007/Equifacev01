@@ -1,36 +1,31 @@
-"""
+""""""
 ===============================================================================
-FastAPI Web Application for Facial Symmetry Analysis
+Flask Web Application for Facial Symmetry Analysis
 -------------------------------------------------------------------------------
 This application:
-  - Accepts image uploads via POST /upload.
-  - Preprocesses images (correct orientation, color mode, resizing).
+  - Serves a web interface for uploading images or capturing webcam shots.
+  - Preprocesses images (correcting orientation, color mode, and resizing).
   - Uses MediaPipe's Face Mesh to detect facial landmarks.
-  - Computes facial symmetry scores.
-  - Returns results as JSON (no images stored, all in-memory).
+  - Computes various symmetry scores based on key facial features.
+  - Returns the analysis results as JSON.
+  - Does NOT save uploaded files (all processing is done in-memory).
 ===============================================================================
 """
 
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+# -----------------------------------------------------------------------------
+# Module Imports and Flask App Configuration
+# -----------------------------------------------------------------------------
+from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 from io import BytesIO
 from PIL import Image, ImageOps, ExifTags
 import cv2
 import mediapipe as mp
 import numpy as np
 
-# -----------------------------------------------------------------------------
-# FastAPI App Config
-# -----------------------------------------------------------------------------
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # you can restrict to frontend domain later
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Initialize the Flask application and enable CORS for cross-domain requests.
+app = Flask(__name__)
+CORS(app)
 
 # -----------------------------------------------------------------------------
 # MediaPipe Face Mesh Initialization
@@ -39,9 +34,24 @@ mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh()
 
 # -----------------------------------------------------------------------------
-# Image Preprocessing Function
+# Image Preprocessing Function (in-memory)
 # -----------------------------------------------------------------------------
-def preprocess_image(pil_img: Image.Image) -> Image.Image:
+def preprocess_image(pil_img):
+    """
+    Preprocesses a PIL image to prepare it for facial symmetry analysis.
+
+    Steps:
+      1. Correct EXIF orientation if available.
+      2. Convert RGBA to RGB if needed.
+      3. Resize to (310x413).
+    
+    Parameters:
+      pil_img (PIL.Image): Input image.
+
+    Returns:
+      PIL.Image: Preprocessed image.
+    """
+    # Correct EXIF orientation
     try:
         exif = pil_img._getexif()
     except Exception:
@@ -50,27 +60,40 @@ def preprocess_image(pil_img: Image.Image) -> Image.Image:
     if exif is not None:
         orientation_tag = None
         for tag, value in ExifTags.TAGS.items():
-            if value == "Orientation":
+            if value == 'Orientation':
                 orientation_tag = tag
                 break
         if orientation_tag in exif and exif[orientation_tag] != 1:
             pil_img = ImageOps.exif_transpose(pil_img)
 
+    # Convert to RGB if RGBA
     if pil_img.mode == "RGBA":
         pil_img = pil_img.convert("RGB")
 
+    # Resize
     pil_img = pil_img.resize((310, 413))
     return pil_img
 
 # -----------------------------------------------------------------------------
-# Facial Symmetry Analysis
+# Facial Symmetry Analysis Function using MediaPipe
 # -----------------------------------------------------------------------------
-def analyze_symmetry_mediapipe(pil_img: Image.Image) -> dict:
+def analyze_symmetry_mediapipe(pil_img):
+    """
+    Analyzes facial symmetry using MediaPipe Face Mesh.
+
+    Parameters:
+      pil_img (PIL.Image): Preprocessed PIL image.
+
+    Returns:
+      dict: Symmetry scores or error message.
+    """
     pil_img = preprocess_image(pil_img)
 
+    # Convert to OpenCV format
     image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+    # Detect landmarks
     results = face_mesh.process(image_rgb)
     if not results.multi_face_landmarks:
         return {"error": "No face detected"}
@@ -82,12 +105,14 @@ def analyze_symmetry_mediapipe(pil_img: Image.Image) -> dict:
         for landmark in landmarks
     ]
 
+    # Symmetry metrics
     eyes_symmetry = max(0, 100 - abs(points[33][0] - points[133][0]))
     mouth_symmetry = max(0, 100 - abs(points[62][0] - points[314][0]))
     nose_symmetry = max(0, 100 - abs(points[31][0] - points[35][0]))
     eyebrows_symmetry = max(0, 100 - abs(points[21][1] - points[22][1]))
     jawline_symmetry = max(0, 100 - abs(points[5][1] - points[11][1]))
 
+    # Vertical symmetry
     midline_x = (points[27][0] + points[30][0]) // 2
     vertical_symmetry_diff = 0
     count = 0
@@ -98,6 +123,7 @@ def analyze_symmetry_mediapipe(pil_img: Image.Image) -> dict:
         count += 1
     vertical_symmetry = max(0, 100 - (vertical_symmetry_diff / count))
 
+    # Horizontal symmetry
     eye_top = (points[37][1] + points[38][1] + points[43][1] + points[44][1]) / 4
     eye_bottom = (points[40][1] + points[41][1] + points[46][1] + points[47][1]) / 4
     horizontal_symmetry_diff = abs(eye_bottom - eye_top)
@@ -106,7 +132,7 @@ def analyze_symmetry_mediapipe(pil_img: Image.Image) -> dict:
     overall_symmetry = np.mean([
         eyes_symmetry, mouth_symmetry, nose_symmetry,
         eyebrows_symmetry, jawline_symmetry,
-        vertical_symmetry, horizontal_symmetry,
+        vertical_symmetry, horizontal_symmetry
     ])
 
     return {
@@ -117,29 +143,47 @@ def analyze_symmetry_mediapipe(pil_img: Image.Image) -> dict:
         "jawline": jawline_symmetry,
         "vertical_symmetry": vertical_symmetry,
         "horizontal_symmetry": horizontal_symmetry,
-        "overall": overall_symmetry,
+        "overall": overall_symmetry
     }
 
 # -----------------------------------------------------------------------------
-# FastAPI Routes
+# Flask Routes
 # -----------------------------------------------------------------------------
-@app.get("/")
-def home():
-    return {"message": "Face Symmetry FastAPI backend running 🎉"}
+@app.route("/", methods=["GET"])
+def index():
+    return render_template("/index.html")
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith((".jpg", ".jpeg")):
-        return JSONResponse(content={"error": "Invalid file type"}, status_code=400)
+@app.route("/upload", methods=["POST"])
+def upload():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"})
 
-    try:
-        contents = await file.read()
-        pil_img = Image.open(BytesIO(contents))
-        analysis_results = analyze_symmetry_mediapipe(pil_img)
-    except Exception as e:
-        return JSONResponse(content={"error": f"Error in analyzing image: {str(e)}"}, status_code=500)
+    if file and file.filename.lower().endswith(('.jpeg', '.jpg')):
+        try:
+            pil_img = Image.open(BytesIO(file.read()))
+            analysis_results = analyze_symmetry_mediapipe(pil_img)
+        except Exception as e:
+            return jsonify({"error": f"Error in analyzing image: {str(e)}"})
+        
+        return jsonify(analysis_results)
 
-    return JSONResponse(content=analysis_results)
+    return jsonify({"error": "Invalid file type"})
+
+# -----------------------------------------------------------------------------
+# Application Entry Point
+# -----------------------------------------------------------------------------
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)
+
+
+
+
+
+
 
 # -----------------------------------------------------------------------------
 # Entry point for local dev
