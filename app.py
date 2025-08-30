@@ -145,8 +145,9 @@ async def upload(file: UploadFile = File(...)):
 # Entry point for local dev
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    import os
+    port = int(os.environ.get("PORT", 8080))  # Koyeb assigns a dynamic port
+    app.run(host="0.0.0.0", port=port)
 
 
 
