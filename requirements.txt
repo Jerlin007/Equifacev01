@@ -6,5 +6,10 @@ opencv-python-headless==4.9.0.80
 pillow==10.3.0
 numpy==1.26.4
 
+# prevent pulling torch + GPU stuff
+torch==2.2.2+cpu ; sys_platform == "linux"
+-f https://download.pytorch.org/whl/cpu
+
+
 
 
