@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir --only-binary=:all: --no-deps -r requirements.txt
 # Copy project files
 COPY . .
 
+# after installing packages
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+
 # Expose port 8080 for Koyeb
 EXPOSE 8080
 
